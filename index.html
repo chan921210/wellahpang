@@ -23,38 +23,18 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
-    }
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      margin-bottom: 14px;
     }
     .badge {
       background: rgba(255, 255, 255, 0.12);
       border: 1px solid rgba(255, 255, 255, 0.1);
-      padding: 8px 14px;
+      padding: 8px 18px;
       border-radius: 20px;
       font-size: 15px;
       font-weight: bold;
     }
-    .badge span { color: #feca57; font-size: 17px; }
+    .badge span { color: #feca57; font-size: 18px; }
     #timer.warning { color: #ff4757; }
-
-    /* BGM 컨트롤 버튼 */
-    .btn-sound {
-      background: rgba(255, 255, 255, 0.12);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: #fff;
-      font-size: 15px;
-      padding: 8px 14px;
-      border-radius: 20px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-    }
 
     #gameCanvas {
       background: #242638;
@@ -137,14 +117,8 @@
 </head>
 <body>
 
-  <!-- DOM 내장 오디오 태그 (가장 호환성이 높음) -->
-  <audio id="bgmAudio" src="./심쿵해.mp3" loop preload="auto"></audio>
-
   <div class="header">
-    <div class="header-left">
-      <div class="badge">남은 시간: <span id="timer">60</span>s</div>
-      <button class="btn-sound" id="btnSound" onclick="toggleSound()">🔇 BGM OFF</button>
-    </div>
+    <div class="badge">남은 시간: <span id="timer">60</span>s</div>
     <div class="badge">점수: <span id="score">0</span></div>
   </div>
 
@@ -218,43 +192,6 @@
       img.onerror = () => { images[key] = null; };
     }
 
-    // ==========================================
-    // 🎵 BGM 컨트롤
-    // ==========================================
-    const bgm = document.getElementById("bgmAudio");
-    const btnSound = document.getElementById("btnSound");
-    bgm.volume = 0.5;
-
-    let userMuted = false;
-
-    function playAudioSafe() {
-      if (userMuted) return;
-      bgm.play().then(() => {
-        btnSound.innerText = "🔊 BGM ON";
-      }).catch(() => {
-        // 브라우저가 아직 대기 중일 때는 조용히 무시
-      });
-    }
-
-    function toggleSound() {
-      if (bgm.paused) {
-        userMuted = false;
-        bgm.play().then(() => {
-          btnSound.innerText = "🔊 BGM ON";
-        }).catch(err => {
-          console.warn("오디오 재생 실패:", err);
-        });
-      } else {
-        userMuted = true;
-        bgm.pause();
-        btnSound.innerText = "🔇 BGM OFF";
-      }
-    }
-
-    // 첫 인터랙션 시 자동 재생 시도
-    window.addEventListener("pointerdown", () => playAudioSafe(), { once: true });
-    window.addEventListener("touchstart", () => playAudioSafe(), { once: true });
-
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     canvas.width = CANVAS_WIDTH;
@@ -288,7 +225,7 @@
 
       if (strokeColor) {
         ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 2;
         ctx.stroke();
       }
     }
@@ -297,13 +234,13 @@
       return Math.floor(Math.random() * 5);
     }
 
-    function createTileObj(type, r, c, startOffsetCount = 0) {
+    function createTileObj(type, r, c, startOffset = 0) {
       const targetX = c * TILE_SIZE;
       const targetY = r * TILE_SIZE;
       return {
         type: type,
         x: targetX,
-        y: startOffsetCount > 0 ? targetY - (startOffsetCount * TILE_SIZE) : targetY,
+        y: startOffset > 0 ? targetY - (startOffset * TILE_SIZE) : targetY,
         targetX: targetX,
         targetY: targetY
       };
@@ -321,15 +258,17 @@
 
     function resolveInitialMatches() {
       let matched = checkMatchesOnly();
-      while (matched.length > 0) {
+      let limit = 0;
+      while (matched.length > 0 && limit < 20) {
         matched.forEach(({ r, c }) => {
           board[r][c].type = getRandomNormalTile();
         });
         matched = checkMatchesOnly();
+        limit++;
       }
     }
 
-    function spawnParticles(x, y, color, count = 8) {
+    function spawnParticles(x, y, color = "#feca57", count = 8) {
       for (let i = 0; i < count; i++) {
         particles.push({
           x: x + TILE_SIZE / 2,
@@ -337,22 +276,25 @@
           vx: (Math.random() - 0.5) * 8,
           vy: (Math.random() - 0.5) * 8 - 2,
           size: Math.random() * 5 + 3,
-          color: color || "#feca57",
+          color: color,
           life: 1,
           decay: Math.random() * 0.04 + 0.03
         });
       }
     }
 
+    // 렌더링 루프
     function gameLoop() {
       ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
+      // 1. 배경 슬롯
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
           fillRoundedRect(c * TILE_SIZE + 4, r * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8, 12, "#2b2d42");
         }
       }
 
+      // 2. 타일 렌더링
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
           const tile = board[r][c];
@@ -385,6 +327,7 @@
         }
       }
 
+      // 3. 파티클
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.x += p.vx;
@@ -409,7 +352,7 @@
     }
 
     // ==========================================
-    // 👆 터치 & 마우스 조작
+    // 👆 터치 조작 핸들러
     // ==========================================
     function getCoords(e) {
       const rect = canvas.getBoundingClientRect();
@@ -419,7 +362,6 @@
     }
 
     function handleStart(e) {
-      playAudioSafe();
       if (isGameOver || isBusy) return;
       const pos = getCoords(e);
       const col = Math.floor(pos.x / TILE_SIZE);
@@ -440,19 +382,24 @@
 
       const currentTile = board[startTile.row][startTile.col];
 
+      // 탭 단독 아이템 발동
       if (Math.abs(dx) < 15 && Math.abs(dy) < 15) {
         if (currentTile && currentTile.type >= 5) {
           isBusy = true;
-          await triggerItemTap(startTile.row, startTile.col, currentTile.type);
-          await applyGravity();
-          await processCascade();
-          isBusy = false;
-          startPos = null;
-          startTile = null;
+          try {
+            await triggerItemTap(startTile.row, startTile.col, currentTile.type);
+            await applyGravity();
+            await processCascade();
+          } finally {
+            isBusy = false;
+            startPos = null;
+            startTile = null;
+          }
           return;
         }
       }
 
+      // 스와이프 조작
       let targetTile = null;
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 20) {
         targetTile = { row: startTile.row, col: startTile.col + (dx > 0 ? 1 : -1) };
@@ -461,7 +408,12 @@
       }
 
       if (targetTile && targetTile.row >= 0 && targetTile.row < GRID_SIZE && targetTile.col >= 0 && targetTile.col < GRID_SIZE) {
-        await executeSwap(startTile, targetTile);
+        isBusy = true;
+        try {
+          await executeSwap(startTile, targetTile);
+        } finally {
+          isBusy = false;
+        }
       }
 
       startPos = null;
@@ -474,7 +426,6 @@
     canvas.addEventListener("mouseup", handleEnd);
 
     async function executeSwap(t1, t2) {
-      isBusy = true;
       const tile1 = board[t1.row][t1.col];
       const tile2 = board[t2.row][t2.col];
 
@@ -487,14 +438,15 @@
 
       await sleep(220);
 
+      // 특수 아이템 조합
       if (tile1.type >= 5 && tile2.type >= 5) {
         await triggerComboSpecial(t2.row, t2.col, tile1.type, tile2.type);
         await applyGravity();
         await processCascade();
-        isBusy = false;
         return;
       }
 
+      // 단일 특수 아이템 + 일반 타일
       if (tile1.type >= 5 || tile2.type >= 5) {
         let triggered = false;
         if (tile1.type === TYPE_FEVER || tile2.type === TYPE_FEVER) {
@@ -512,17 +464,18 @@
         if (triggered) {
           await applyGravity();
           await processCascade();
-          isBusy = false;
           return;
         }
       }
 
+      // 일반 매칭 판정
       const matched = checkMatchesOnly();
       if (matched.length > 0) {
         await clearMatches(matched, t2);
         await applyGravity();
         await processCascade();
       } else {
+        // 롤백
         tile1.targetX = t1.col * TILE_SIZE;
         tile1.targetY = t1.row * TILE_SIZE;
         tile2.targetX = t2.col * TILE_SIZE;
@@ -531,7 +484,6 @@
         board[t2.row][t2.col] = tile2;
         await sleep(220);
       }
-      isBusy = false;
     }
 
     // ==========================================
@@ -543,7 +495,7 @@
       if (types[0] === TYPE_FEVER && types[1] === TYPE_FEVER) {
         for (let i = 0; i < GRID_SIZE; i++) {
           for (let j = 0; j < GRID_SIZE; j++) {
-            spawnParticles(j * TILE_SIZE, i * TILE_SIZE, "#ffeaa7", 12);
+            spawnParticles(j * TILE_SIZE, i * TILE_SIZE, "#ffeaa7", 10);
             board[i][j].type = -1;
           }
         }
@@ -576,7 +528,7 @@
             const nr = r + dr, nc = c + dc;
             if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE) {
               if (board[nr][nc].type !== -1) {
-                spawnParticles(nc * TILE_SIZE, nr * TILE_SIZE, "#ff7675", 10);
+                spawnParticles(nc * TILE_SIZE, nr * TILE_SIZE, "#ff7675", 8);
                 board[nr][nc].type = -1;
                 addScore(200);
               }
@@ -623,7 +575,6 @@
         }
         addScore(1000);
       }
-
       await sleep(200);
     }
 
@@ -711,27 +662,35 @@
     // ==========================================
     function checkMatchesOnly() {
       let matched = [];
+      // 가로
       for (let r = 0; r < GRID_SIZE; r++) {
-        for (let c = 0; c < GRID_SIZE; c++) {
+        let c = 0;
+        while (c < GRID_SIZE) {
           const type = board[r][c].type;
-          if (type < 0 || type >= 5) continue;
+          if (type < 0 || type >= 5) { c++; continue; }
           let len = 1;
           while (c + len < GRID_SIZE && board[r][c + len].type === type) len++;
           if (len >= 3) {
             for (let k = 0; k < len; k++) matched.push({ r, c: c + k, len, dir: 'h', type });
-            c += len - 1;
+            c += len;
+          } else {
+            c++;
           }
         }
       }
+      // 세로
       for (let c = 0; c < GRID_SIZE; c++) {
-        for (let r = 0; r < GRID_SIZE; r++) {
+        let r = 0;
+        while (r < GRID_SIZE) {
           const type = board[r][c].type;
-          if (type < 0 || type >= 5) continue;
+          if (type < 0 || type >= 5) { r++; continue; }
           let len = 1;
           while (r + len < GRID_SIZE && board[r + len][c].type === type) len++;
           if (len >= 3) {
             for (let k = 0; k < len; k++) matched.push({ r: r + k, c, len, dir: 'v', type });
-            r += len - 1;
+            r += len;
+          } else {
+            r++;
           }
         }
       }
@@ -759,12 +718,14 @@
     }
 
     async function processCascade() {
-      while (true) {
+      let loops = 0;
+      while (loops < 15) {
         const matches = checkMatchesOnly();
         if (matches.length === 0) break;
 
         await clearMatches(matches);
         await applyGravity();
+        loops++;
       }
     }
 
@@ -818,7 +779,6 @@
 
     function endGame() {
       isGameOver = true;
-      if (bgm) bgm.pause();
       document.getElementById("finalScore").innerText = score.toLocaleString();
       document.getElementById("resultModal").style.display = "flex";
     }
