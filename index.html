@@ -155,7 +155,7 @@
 
   <script>
     // ==========================================
-    // ⚙️ 1. 설정 (Apps Script URL)
+    // ⚙️ 1. 설정
     // ==========================================
     const GOOGLE_SCRIPT_URL = "여기에_구글_APPS_SCRIPT_URL을_붙여넣으세요";
 
@@ -169,7 +169,6 @@
     const TYPE_CROSS = 6;
     const TYPE_FEVER = 7;
 
-    // 이미지 경로 목록
     const IMAGE_SOURCES = {
       0: "item1.png",
       1: "item2.png",
@@ -190,14 +189,8 @@
     for (let key in IMAGE_SOURCES) {
       const img = new Image();
       img.src = IMAGE_SOURCES[key];
-      img.onload = () => {
-        images[key] = img;
-        drawBoard();
-      };
-      img.onerror = () => {
-        images[key] = null;
-        drawBoard();
-      };
+      img.onload = () => { images[key] = img; };
+      img.onerror = () => { images[key] = null; };
     }
 
     const canvas = document.getElementById("gameCanvas");
@@ -206,10 +199,12 @@
     canvas.height = CANVAS_HEIGHT;
 
     let board = [];
+    let particles = [];
     let score = 0;
     let timeLeft = 60;
     let timerInterval = null;
     let isGameOver = false;
+    let isBusy = false;
 
     let startPos = null;
     let startTile = null;
@@ -234,51 +229,125 @@
       return Math.floor(Math.random() * 5);
     }
 
+    function createTileObj(type, r, c, startFromTop = false) {
+      const targetX = c * TILE_SIZE;
+      const targetY = r * TILE_SIZE;
+      return {
+        type: type,
+        x: targetX,
+        y: startFromTop ? targetY - TILE_SIZE * 3 : targetY,
+        targetX: targetX,
+        targetY: targetY,
+        scale: 1,
+        alpha: 1
+      };
+    }
+
     function initBoard() {
       for (let r = 0; r < GRID_SIZE; r++) {
         board[r] = [];
         for (let c = 0; c < GRID_SIZE; c++) {
-          board[r][c] = getRandomNormalTile();
+          board[r][c] = createTileObj(getRandomNormalTile(), r, c);
         }
       }
-      checkAndProcessMatches(false);
+      resolveInitialMatches();
     }
 
-    function drawBoard() {
-      if (!board || board.length === 0) return;
+    function resolveInitialMatches() {
+      let matched = checkMatchesOnly();
+      while (matched.length > 0) {
+        matched.forEach(({ r, c }) => {
+          board[r][c].type = getRandomNormalTile();
+        });
+        matched = checkMatchesOnly();
+      }
+    }
+
+    function spawnParticles(x, y, color, count = 8) {
+      for (let i = 0; i < count; i++) {
+        particles.push({
+          x: x + TILE_SIZE / 2,
+          y: y + TILE_SIZE / 2,
+          vx: (Math.random() - 0.5) * 10,
+          vy: (Math.random() - 0.5) * 10 - 2,
+          size: Math.random() * 6 + 3,
+          color: color || "#feca57",
+          life: 1,
+          decay: Math.random() * 0.03 + 0.02
+        });
+      }
+    }
+
+    function gameLoop() {
       ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
-          const type = board[r][c];
-          if (type === -1) continue;
+          const tile = board[r][c];
+          if (!tile) continue;
 
-          const x = c * TILE_SIZE;
-          const y = r * TILE_SIZE;
-
-          // 타일 배경
-          fillRoundedRect(x + 4, y + 4, TILE_SIZE - 8, TILE_SIZE - 8, 12, TILE_BG_COLORS[type] || "#343752");
-
-          // 이미지 그리기
-          if (images[type] && images[type].complete && images[type].naturalWidth > 0) {
-            ctx.drawImage(images[type], x + 7, y + 7, TILE_SIZE - 14, TILE_SIZE - 14);
+          const dx = tile.targetX - tile.x;
+          const dy = tile.targetY - tile.y;
+          if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+            tile.x += dx * 0.25;
+            tile.y += dy * 0.25;
+          } else {
+            tile.x = tile.targetX;
+            tile.y = tile.targetY;
           }
+
+          if (tile.type === -1) continue;
+
+          const size = TILE_SIZE - 8;
+          const px = tile.x + 4;
+          const py = tile.y + 4;
+
+          ctx.save();
+          ctx.globalAlpha = tile.alpha;
+          fillRoundedRect(px, py, size, size, 12, TILE_BG_COLORS[tile.type] || "#343752");
+
+          if (images[tile.type] && images[tile.type].complete && images[tile.type].naturalWidth > 0) {
+            ctx.drawImage(images[tile.type], px + 3, py + 3, size - 6, size - 6);
+          }
+          ctx.restore();
         }
       }
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.3;
+        p.life -= p.decay;
+
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+        } else {
+          ctx.save();
+          ctx.globalAlpha = p.life;
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      requestAnimationFrame(gameLoop);
     }
 
+    // ==========================================
+    // 👆 터치 & 마우스 조작
+    // ==========================================
     function getCoords(e) {
       const rect = canvas.getBoundingClientRect();
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
       const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-      return {
-        x: clientX - rect.left,
-        y: clientY - rect.top
-      };
+      return { x: clientX - rect.left, y: clientY - rect.top };
     }
 
     function handleStart(e) {
-      if (isGameOver) return;
+      if (isGameOver || isBusy) return;
       const pos = getCoords(e);
       const col = Math.floor(pos.x / TILE_SIZE);
       const row = Math.floor(pos.y / TILE_SIZE);
@@ -288,14 +357,30 @@
       }
     }
 
-    function handleEnd(e) {
-      if (!startPos || !startTile || isGameOver) return;
+    async function handleEnd(e) {
+      if (!startPos || !startTile || isGameOver || isBusy) return;
       const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
       const clientY = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
       const rect = canvas.getBoundingClientRect();
       const dx = (clientX - rect.left) - startPos.x;
       const dy = (clientY - rect.top) - startPos.y;
 
+      const currentTile = board[startTile.row][startTile.col];
+
+      // 💥 단순 탭/클릭 시 단독 아이템 발동
+      if (Math.abs(dx) < 15 && Math.abs(dy) < 15) {
+        if (currentTile && currentTile.type >= 5) {
+          isBusy = true;
+          await triggerItemTap(startTile.row, startTile.col, currentTile.type);
+          await processCascade();
+          isBusy = false;
+          startPos = null;
+          startTile = null;
+          return;
+        }
+      }
+
+      // 🔄 스와이프 조작
       let targetTile = null;
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 20) {
         targetTile = { row: startTile.row, col: startTile.col + (dx > 0 ? 1 : -1) };
@@ -304,8 +389,9 @@
       }
 
       if (targetTile && targetTile.row >= 0 && targetTile.row < GRID_SIZE && targetTile.col >= 0 && targetTile.col < GRID_SIZE) {
-        swapTiles(startTile, targetTile);
+        await executeSwap(startTile, targetTile);
       }
+
       startPos = null;
       startTile = null;
     }
@@ -315,162 +401,338 @@
     canvas.addEventListener("mousedown", handleStart);
     canvas.addEventListener("mouseup", handleEnd);
 
-    function swapTiles(t1, t2) {
-      const type1 = board[t1.row][t1.col];
-      const type2 = board[t2.row][t2.col];
+    async function executeSwap(t1, t2) {
+      isBusy = true;
+      const tile1 = board[t1.row][t1.col];
+      const tile2 = board[t2.row][t2.col];
 
-      if (type1 === TYPE_FEVER || type2 === TYPE_FEVER) {
-        const targetIconType = type1 === TYPE_FEVER ? type2 : type1;
-        board[t1.row][t1.col] = -1;
-        board[t2.row][t2.col] = -1;
-        activateFever(targetIconType);
+      tile1.targetX = t2.col * TILE_SIZE;
+      tile1.targetY = t2.row * TILE_SIZE;
+      tile2.targetX = t1.col * TILE_SIZE;
+      tile2.targetY = t1.row * TILE_SIZE;
+      board[t1.row][t1.col] = tile2;
+      board[t2.row][t2.col] = tile1;
+
+      await sleep(220);
+
+      // ✨ [특수 아이템 간의 결합 조합 판정] ✨
+      if (tile1.type >= 5 && tile2.type >= 5) {
+        await triggerComboSpecial(t2.row, t2.col, tile1.type, tile2.type);
+        await processCascade();
+        isBusy = false;
         return;
       }
 
-      board[t1.row][t1.col] = type2;
-      board[t2.row][t2.col] = type1;
+      // 단일 특수 아이템 + 일반 타일 스왑 발동
+      if (tile1.type >= 5 || tile2.type >= 5) {
+        let triggered = false;
+        if (tile1.type === TYPE_FEVER || tile2.type === TYPE_FEVER) {
+          const targetType = tile1.type === TYPE_FEVER ? tile2.type : tile1.type;
+          board[t1.row][t1.col].type = -1;
+          board[t2.row][t2.col].type = -1;
+          await triggerFever(targetType);
+          triggered = true;
+        } else {
+          if (tile1.type >= 5) triggerSpecialEffect(t2.row, t2.col, tile1.type);
+          if (tile2.type >= 5) triggerSpecialEffect(t1.row, t1.col, tile2.type);
+          triggered = true;
+        }
 
-      if (!checkAndProcessMatches(true, t2)) {
-        setTimeout(() => {
-          board[t2.row][t2.col] = type2;
-          board[t1.row][t1.col] = type1;
-          drawBoard();
-        }, 200);
+        if (triggered) {
+          await processCascade();
+          isBusy = false;
+          return;
+        }
       }
-      drawBoard();
+
+      // 일반 매칭 판정
+      const matched = checkMatchesOnly();
+      if (matched.length > 0) {
+        await processCascade(t2);
+      } else {
+        // 매칭 실패 시 롤백
+        tile1.targetX = t1.col * TILE_SIZE;
+        tile1.targetY = t1.row * TILE_SIZE;
+        tile2.targetX = t2.col * TILE_SIZE;
+        tile2.targetY = t2.row * TILE_SIZE;
+        board[t1.row][t1.col] = tile1;
+        board[t2.row][t2.col] = tile2;
+        await sleep(220);
+      }
+      isBusy = false;
     }
 
-    function triggerSpecialTile(r, c, type) {
+    // ==========================================
+    // 🌟 특수 아이템 결합(Combo) 로직
+    // ==========================================
+    async function triggerComboSpecial(r, c, type1, type2) {
+      const types = [type1, type2].sort(); // 5: Bomb, 6: Cross, 7: Fever
+
+      // 1. 피버 + 피버 (전체 화면 올 클리어)
+      if (types[0] === TYPE_FEVER && types[1] === TYPE_FEVER) {
+        for (let i = 0; i < GRID_SIZE; i++) {
+          for (let j = 0; j < GRID_SIZE; j++) {
+            spawnParticles(j * TILE_SIZE, i * TILE_SIZE, "#ffeaa7", 12);
+            board[i][j].type = -1;
+          }
+        }
+        addScore(10000);
+      }
+      // 2. 피버 + 폭탄 또는 피버 + 크로스 (화면 내 특정 아이콘을 전부 특수 아이템으로 복제 후 동시 폭발)
+      else if (types[1] === TYPE_FEVER) {
+        const specialTypeToSpawn = types[0]; // BOMB or CROSS
+        const mostType = getMostCommonNormalType();
+        
+        // 피버와 대상 아이템 자리 제거
+        for (let i = 0; i < GRID_SIZE; i++) {
+          for (let j = 0; j < GRID_SIZE; j++) {
+            if (board[i][j].type === mostType || board[i][j].type === TYPE_FEVER) {
+              board[i][j].type = specialTypeToSpawn;
+              spawnParticles(j * TILE_SIZE, i * TILE_SIZE, "#ffeaa7", 6);
+            }
+          }
+        }
+        await sleep(300);
+        
+        // 복제된 특수 아이템들 일제 폭파
+        for (let i = 0; i < GRID_SIZE; i++) {
+          for (let j = 0; j < GRID_SIZE; j++) {
+            if (board[i][j].type === specialTypeToSpawn) {
+              triggerSpecialEffect(i, j, specialTypeToSpawn);
+            }
+          }
+        }
+        addScore(5000);
+      }
+      // 3. 폭탄 + 폭탄 (초대형 5x5 메가 폭탄)
+      else if (types[0] === TYPE_BOMB && types[1] === TYPE_BOMB) {
+        for (let dr = -2; dr <= 2; dr++) {
+          for (let dc = -2; dc <= 2; dc++) {
+            const nr = r + dr, nc = c + dc;
+            if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE) {
+              if (board[nr][nc].type !== -1) {
+                spawnParticles(nc * TILE_SIZE, nr * TILE_SIZE, "#ff7675", 10);
+                board[nr][nc].type = -1;
+                addScore(200);
+              }
+            }
+          }
+        }
+        addScore(1500);
+      }
+      // 4. 폭탄 + 크로스 (트리플 3줄 십자 레이저: 가로 3줄 + 세로 3줄 폭파)
+      else if (types[0] === TYPE_BOMB && types[1] === TYPE_CROSS) {
+        for (let offset = -1; offset <= 1; offset++) {
+          // 가로 3줄
+          const targetR = r + offset;
+          if (targetR >= 0 && targetR < GRID_SIZE) {
+            for (let i = 0; i < GRID_SIZE; i++) {
+              if (board[targetR][i].type !== -1) {
+                spawnParticles(i * TILE_SIZE, targetR * TILE_SIZE, "#55efc4", 6);
+                board[targetR][i].type = -1;
+                addScore(100);
+              }
+            }
+          }
+          // 세로 3줄
+          const targetC = c + offset;
+          if (targetC >= 0 && targetC < GRID_SIZE) {
+            for (let i = 0; i < GRID_SIZE; i++) {
+              if (board[i][targetC].type !== -1) {
+                spawnParticles(targetC * TILE_SIZE, i * TILE_SIZE, "#55efc4", 6);
+                board[i][targetC].type = -1;
+                addScore(100);
+              }
+            }
+          }
+        }
+        addScore(2000);
+      }
+      // 5. 크로스 + 크로스 (십자 전체 강화 관통)
+      else if (types[0] === TYPE_CROSS && types[1] === TYPE_CROSS) {
+        for (let i = 0; i < GRID_SIZE; i++) {
+          if (board[r][i].type !== -1) {
+            spawnParticles(i * TILE_SIZE, r * TILE_SIZE, "#a29bfe", 8);
+            board[r][i].type = -1;
+            addScore(150);
+          }
+          if (board[i][c].type !== -1) {
+            spawnParticles(c * TILE_SIZE, i * TILE_SIZE, "#a29bfe", 8);
+            board[i][c].type = -1;
+            addScore(150);
+          }
+        }
+        addScore(1000);
+      }
+
+      await sleep(200);
+    }
+
+    function getMostCommonNormalType() {
+      const counts = {};
+      for (let i = 0; i < GRID_SIZE; i++) {
+        for (let j = 0; j < GRID_SIZE; j++) {
+          const t = board[i][j].type;
+          if (t >= 0 && t < 5) counts[t] = (counts[t] || 0) + 1;
+        }
+      }
+      let mostType = 0, maxC = -1;
+      for (let k in counts) {
+        if (counts[k] > maxC) { maxC = counts[k]; mostType = parseInt(k); }
+      }
+      return mostType;
+    }
+
+    // ==========================================
+    // 💥 단일 특수 아이템 효과
+    // ==========================================
+    async function triggerItemTap(r, c, type) {
+      if (type === TYPE_FEVER) {
+        const mostType = getMostCommonNormalType();
+        board[r][c].type = -1;
+        await triggerFever(mostType);
+      } else {
+        triggerSpecialEffect(r, c, type);
+      }
+    }
+
+    function triggerSpecialEffect(r, c, type) {
+      board[r][c].type = -1;
+      spawnParticles(c * TILE_SIZE, r * TILE_SIZE, TILE_BG_COLORS[type], 10);
+
       if (type === TYPE_BOMB) {
         for (let dr = -1; dr <= 1; dr++) {
           for (let dc = -1; dc <= 1; dc++) {
-            let nr = r + dr, nc = c + dc;
+            const nr = r + dr, nc = c + dc;
             if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE) {
-              board[nr][nc] = -1;
-              score += 150;
+              if (board[nr][nc].type !== -1) {
+                spawnParticles(nc * TILE_SIZE, nr * TILE_SIZE, TILE_BG_COLORS[board[nr][nc].type]);
+                board[nr][nc].type = -1;
+                addScore(150);
+              }
             }
           }
         }
       } else if (type === TYPE_CROSS) {
         for (let i = 0; i < GRID_SIZE; i++) {
-          board[r][i] = -1;
-          board[i][c] = -1;
-          score += 200;
+          if (board[r][i].type !== -1) {
+            spawnParticles(i * TILE_SIZE, r * TILE_SIZE, "#fff");
+            board[r][i].type = -1;
+            addScore(100);
+          }
+          if (board[i][c].type !== -1) {
+            spawnParticles(c * TILE_SIZE, i * TILE_SIZE, "#fff");
+            board[i][c].type = -1;
+            addScore(100);
+          }
         }
       }
     }
 
-    function activateFever(targetType) {
-      let count = 0;
+    async function triggerFever(targetType) {
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
-          if (board[r][c] === targetType || targetType === TYPE_FEVER) {
-            board[r][c] = -1;
-            count++;
+          if (board[r][c].type === targetType || targetType === TYPE_FEVER) {
+            spawnParticles(c * TILE_SIZE, r * TILE_SIZE, "#feca57", 8);
+            board[r][c].type = -1;
+            addScore(250);
           }
         }
       }
-      score += (count + 1) * 300;
-      document.getElementById("score").innerText = score;
-      drawBoard();
-      setTimeout(dropAndRefill, 200);
+      await sleep(150);
     }
 
-    function checkAndProcessMatches(addScore, lastSwapPos = null) {
-      let matched = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(false));
-      let hRuns = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(1));
-      let vRuns = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(1));
-      let hasMatch = false;
+    function addScore(pts) {
+      score += pts;
+      document.getElementById("score").innerText = score.toLocaleString();
+    }
 
+    // ==========================================
+    // 🔍 매칭 및 낙하
+    // ==========================================
+    function checkMatchesOnly() {
+      let matched = [];
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
-          if (board[r][c] < 0 || board[r][c] > 4) continue;
-          let matchLen = 1;
-          while (c + matchLen < GRID_SIZE && board[r][c + matchLen] === board[r][c]) {
-            matchLen++;
-          }
-          if (matchLen >= 3) {
-            hasMatch = true;
-            for (let k = 0; k < matchLen; k++) {
-              matched[r][c + k] = true;
-              hRuns[r][c + k] = matchLen;
-            }
-            c += matchLen - 1;
+          const type = board[r][c].type;
+          if (type < 0 || type >= 5) continue;
+          let len = 1;
+          while (c + len < GRID_SIZE && board[r][c + len].type === type) len++;
+          if (len >= 3) {
+            for (let k = 0; k < len; k++) matched.push({ r, c: c + k, len, dir: 'h', type });
+            c += len - 1;
           }
         }
       }
-
       for (let c = 0; c < GRID_SIZE; c++) {
         for (let r = 0; r < GRID_SIZE; r++) {
-          if (board[r][c] < 0 || board[r][c] > 4) continue;
-          let matchLen = 1;
-          while (r + matchLen < GRID_SIZE && board[r + matchLen][c] === board[r][c]) {
-            matchLen++;
-          }
-          if (matchLen >= 3) {
-            hasMatch = true;
-            for (let k = 0; k < matchLen; k++) {
-              matched[r + k][c] = true;
-              vRuns[r + k][c] = matchLen;
-            }
-            r += matchLen - 1;
+          const type = board[r][c].type;
+          if (type < 0 || type >= 5) continue;
+          let len = 1;
+          while (r + len < GRID_SIZE && board[r + len][c] === board[r][c].type) len++;
+          if (len >= 3) {
+            for (let k = 0; k < len; k++) matched.push({ r: r + k, c, len, dir: 'v', type });
+            r += len - 1;
           }
         }
       }
-
-      if (hasMatch) {
-        let spawnSpecial = null;
-
-        for (let r = 0; r < GRID_SIZE; r++) {
-          for (let c = 0; c < GRID_SIZE; c++) {
-            if (matched[r][c]) {
-              const h = hRuns[r][c];
-              const v = vRuns[r][c];
-
-              if (h >= 5 || v >= 5) spawnSpecial = { r, c, type: TYPE_FEVER };
-              else if (h >= 3 && v >= 3 && !spawnSpecial) spawnSpecial = { r, c, type: TYPE_CROSS };
-              else if ((h >= 4 || v >= 4) && !spawnSpecial) spawnSpecial = { r, c, type: TYPE_BOMB };
-
-              if (board[r][c] >= 5) {
-                triggerSpecialTile(r, c, board[r][c]);
-              }
-
-              board[r][c] = -1;
-              if (addScore) score += 100;
-            }
-          }
-        }
-
-        if (spawnSpecial) {
-          const target = lastSwapPos && matched[lastSwapPos.row][lastSwapPos.col] ? lastSwapPos : spawnSpecial;
-          board[target.r || target.row][target.c || target.col] = spawnSpecial.type;
-        }
-
-        if (addScore) document.getElementById("score").innerText = score;
-        dropAndRefill();
-        return true;
-      }
-      return false;
+      return matched;
     }
 
-    function dropAndRefill() {
+    async function processCascade(spawnPos = null) {
+      while (true) {
+        const matches = checkMatchesOnly();
+        if (matches.length === 0) break;
+
+        let spawnSpecial = null;
+        matches.forEach(m => {
+          if (m.len >= 5) spawnSpecial = { r: m.r, c: m.c, type: TYPE_FEVER };
+          else if (m.len === 4 && !spawnSpecial) spawnSpecial = { r: m.r, c: m.c, type: TYPE_BOMB };
+          
+          if (board[m.r][m.c].type !== -1) {
+            spawnParticles(m.c * TILE_SIZE, m.r * TILE_SIZE, TILE_BG_COLORS[board[m.r][m.c].type]);
+            board[m.r][m.c].type = -1;
+            addScore(100);
+          }
+        });
+
+        if (spawnSpecial) {
+          const target = spawnPos || spawnSpecial;
+          board[target.r || target.row][target.c || target.col].type = spawnSpecial.type;
+        }
+
+        await sleep(150);
+        await applyGravity();
+        await sleep(250);
+      }
+    }
+
+    async function applyGravity() {
       for (let c = 0; c < GRID_SIZE; c++) {
         let emptyRow = GRID_SIZE - 1;
         for (let r = GRID_SIZE - 1; r >= 0; r--) {
-          if (board[r][c] !== -1) {
-            board[emptyRow][c] = board[r][c];
-            if (emptyRow !== r) board[r][c] = -1;
+          if (board[r][c].type !== -1) {
+            if (emptyRow !== r) {
+              board[emptyRow][c] = board[r][c];
+              board[emptyRow][c].targetY = emptyRow * TILE_SIZE;
+              board[r][c] = createTileObj(-1, r, c);
+            }
             emptyRow--;
           }
         }
         for (let r = emptyRow; r >= 0; r--) {
-          board[r][c] = getRandomNormalTile();
+          board[r][c] = createTileObj(getRandomNormalTile(), r, c, true);
         }
       }
-      drawBoard();
-      setTimeout(() => checkAndProcessMatches(true), 250);
     }
 
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // ==========================================
+    // ⏱️ 타이머 및 응모
+    // ==========================================
     function startTimer() {
       timerInterval = setInterval(() => {
         timeLeft--;
@@ -522,7 +784,7 @@
     }
 
     initBoard();
-    drawBoard();
+    gameLoop();
     startTimer();
   </script>
 </body>
