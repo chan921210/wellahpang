@@ -137,10 +137,13 @@
 </head>
 <body>
 
+  <!-- DOM 내장 오디오 태그 (가장 호환성이 높음) -->
+  <audio id="bgmAudio" src="./심쿵해.mp3" loop preload="auto"></audio>
+
   <div class="header">
     <div class="header-left">
       <div class="badge">남은 시간: <span id="timer">60</span>s</div>
-      <button class="btn-sound" id="btnSound" onclick="toggleSound()">🔇 BGM ON</button>
+      <button class="btn-sound" id="btnSound" onclick="toggleSound()">🔇 BGM OFF</button>
     </div>
     <div class="badge">점수: <span id="score">0</span></div>
   </div>
@@ -202,7 +205,6 @@
       7: "fever.png"
     };
 
-    // 타일 배경색: 일반 아이템(0~4)은 깨끗한 순백색(#ffffff), 특수 아이템은 부드러운 강조 배경
     const TILE_BG_COLORS = [
       "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff",
       "#ffecec", "#ebfbee", "#fff9db"
@@ -219,48 +221,39 @@
     // ==========================================
     // 🎵 BGM 컨트롤
     // ==========================================
-    const bgm = new Audio("bgm.mp3");
-    bgm.loop = true;
+    const bgm = document.getElementById("bgmAudio");
+    const btnSound = document.getElementById("btnSound");
     bgm.volume = 0.5;
 
-    const btnSound = document.getElementById("btnSound");
-    let isBgmPlaying = false;
     let userMuted = false;
 
-    function attemptPlayBgm() {
-      if (userMuted || isBgmPlaying) return;
-      const p = bgm.play();
-      if (p !== undefined) {
-        p.then(() => {
-          isBgmPlaying = true;
-          btnSound.innerText = "🔊 BGM";
-        }).catch(() => {
-          btnSound.innerText = "🔇 BGM ON";
-        });
-      }
+    function playAudioSafe() {
+      if (userMuted) return;
+      bgm.play().then(() => {
+        btnSound.innerText = "🔊 BGM ON";
+      }).catch(() => {
+        // 브라우저가 아직 대기 중일 때는 조용히 무시
+      });
     }
 
     function toggleSound() {
-      if (!isBgmPlaying || bgm.paused) {
+      if (bgm.paused) {
         userMuted = false;
         bgm.play().then(() => {
-          isBgmPlaying = true;
-          btnSound.innerText = "🔊 BGM";
+          btnSound.innerText = "🔊 BGM ON";
         }).catch(err => {
-          alert("음원 파일(bgm.mp3)을 불러올 수 없거나 권한이 제한되었습니다.");
+          console.warn("오디오 재생 실패:", err);
         });
       } else {
         userMuted = true;
         bgm.pause();
-        isBgmPlaying = false;
         btnSound.innerText = "🔇 BGM OFF";
       }
     }
 
-    const unlockEvents = ["pointerdown", "touchstart", "click"];
-    unlockEvents.forEach(evt => {
-      window.addEventListener(evt, () => attemptPlayBgm(), { passive: true });
-    });
+    // 첫 인터랙션 시 자동 재생 시도
+    window.addEventListener("pointerdown", () => playAudioSafe(), { once: true });
+    window.addEventListener("touchstart", () => playAudioSafe(), { once: true });
 
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
@@ -354,14 +347,12 @@
     function gameLoop() {
       ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-      // 1. 베이스 슬롯 배경
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
           fillRoundedRect(c * TILE_SIZE + 4, r * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8, 12, "#2b2d42");
         }
       }
 
-      // 2. 화이트 타일 및 아이템 렌더링
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
           const tile = board[r][c];
@@ -381,23 +372,19 @@
           const px = tile.x + 4;
           const py = tile.y + 4;
 
-          // 특수 아이템 테두리 강조
           let strokeColor = null;
           if (tile.type === TYPE_BOMB) strokeColor = "#ff6b6b";
           else if (tile.type === TYPE_CROSS) strokeColor = "#51cf66";
           else if (tile.type === TYPE_FEVER) strokeColor = "#fcc419";
 
-          // 타일 흰색 배경 렌더링
           fillRoundedRect(px, py, size, size, 12, TILE_BG_COLORS[tile.type] || "#ffffff", strokeColor);
 
-          // 이미지 렌더링 (가장 선명하게 표시)
           if (images[tile.type] && images[tile.type].complete && images[tile.type].naturalWidth > 0) {
             ctx.drawImage(images[tile.type], px + 4, py + 4, size - 8, size - 8);
           }
         }
       }
 
-      // 3. 파티클 렌더링
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.x += p.vx;
@@ -432,7 +419,7 @@
     }
 
     function handleStart(e) {
-      attemptPlayBgm();
+      playAudioSafe();
       if (isGameOver || isBusy) return;
       const pos = getCoords(e);
       const col = Math.floor(pos.x / TILE_SIZE);
