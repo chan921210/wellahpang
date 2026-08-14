@@ -136,7 +136,7 @@
 </head>
 <body>
 
-  <!-- BGM 오디오 태그 -->
+  <!-- BGM 태그 -->
   <audio id="bgmAudio" src="bgm.mp3" loop preload="auto"></audio>
 
   <div class="header">
@@ -222,12 +222,11 @@
     // ==========================================
     const bgm = document.getElementById("bgmAudio");
     const btnSound = document.getElementById("btnSound");
-    let isBgmPlaying = false;
+    let isBgmUserMuted = false;
 
-    function playBgmFirstTouch() {
-      if (!isBgmPlaying && bgm.paused) {
+    function playBgm() {
+      if (!isBgmUserMuted && bgm.paused) {
         bgm.play().then(() => {
-          isBgmPlaying = true;
           btnSound.innerText = "🔊";
         }).catch(() => {});
       }
@@ -237,13 +236,18 @@
       if (bgm.paused) {
         bgm.play();
         btnSound.innerText = "🔊";
-        isBgmPlaying = true;
+        isBgmUserMuted = false;
       } else {
         bgm.pause();
         btnSound.innerText = "🔇";
-        isBgmPlaying = false;
+        isBgmUserMuted = true;
       }
     }
+
+    // 첫 터치/클릭 시 오디오 활성화
+    window.addEventListener("pointerdown", () => {
+      playBgm();
+    }, { once: true });
 
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
@@ -271,7 +275,7 @@
       ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
       ctx.lineTo(x + r, y + h);
       ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-      ctx.lineTo(x + r, y + h);
+      ctx.lineTo(x, y + r);
       ctx.quadraticCurveTo(x, y, x + r, y);
       ctx.closePath();
       ctx.fill();
@@ -289,9 +293,7 @@
         x: targetX,
         y: startOffsetCount > 0 ? targetY - (startOffsetCount * TILE_SIZE) : targetY,
         targetX: targetX,
-        targetY: targetY,
-        scale: 1,
-        alpha: 1
+        targetY: targetY
       };
     }
 
@@ -320,51 +322,59 @@
         particles.push({
           x: x + TILE_SIZE / 2,
           y: y + TILE_SIZE / 2,
-          vx: (Math.random() - 0.5) * 10,
-          vy: (Math.random() - 0.5) * 10 - 2,
-          size: Math.random() * 6 + 3,
+          vx: (Math.random() - 0.5) * 8,
+          vy: (Math.random() - 0.5) * 8 - 2,
+          size: Math.random() * 5 + 3,
           color: color || "#feca57",
           life: 1,
-          decay: Math.random() * 0.03 + 0.02
+          decay: Math.random() * 0.04 + 0.03
         });
       }
     }
 
+    // 메인 루프 (깨짐 없이 정밀 렌더링)
     function gameLoop() {
       ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
+      // 1. 고정 배경 타일 격자 그리기 (절대 깨지지 않음)
+      for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+          fillRoundedRect(c * TILE_SIZE + 4, r * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8, 12, "#2b2d42");
+        }
+      }
+
+      // 2. 동적 타일 렌더링
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
           const tile = board[r][c];
-          if (!tile) continue;
+          if (!tile || tile.type === -1) continue;
 
+          // 위치 보간 (부드러운 이동)
           const dx = tile.targetX - tile.x;
           const dy = tile.targetY - tile.y;
-          if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-            tile.x += dx * 0.3;
-            tile.y += dy * 0.3;
+          if (Math.abs(dx) > 0.4 || Math.abs(dy) > 0.4) {
+            tile.x += dx * 0.35;
+            tile.y += dy * 0.35;
           } else {
             tile.x = tile.targetX;
             tile.y = tile.targetY;
           }
 
-          if (tile.type === -1) continue;
-
           const size = TILE_SIZE - 8;
           const px = tile.x + 4;
           const py = tile.y + 4;
 
-          ctx.save();
-          ctx.globalAlpha = tile.alpha;
-          fillRoundedRect(px, py, size, size, 12, TILE_BG_COLORS[tile.type] || "#343752");
+          // 타일 컬러 배경
+          fillRoundedRect(px, py, size, size, 12, TILE_BG_COLORS[tile.type] || "#e5d4ff");
 
+          // 아이콘 이미지
           if (images[tile.type] && images[tile.type].complete && images[tile.type].naturalWidth > 0) {
             ctx.drawImage(images[tile.type], px + 3, py + 3, size - 6, size - 6);
           }
-          ctx.restore();
         }
       }
 
+      // 3. 파티클 이펙트
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.x += p.vx;
@@ -399,7 +409,7 @@
     }
 
     function handleStart(e) {
-      playBgmFirstTouch(); // 첫 터치 시 BGM 자동 재생
+      playBgm();
       if (isGameOver || isBusy) return;
       const pos = getCoords(e);
       const col = Math.floor(pos.x / TILE_SIZE);
@@ -420,7 +430,7 @@
 
       const currentTile = board[startTile.row][startTile.col];
 
-      // 단독 탭 아이템 발동
+      // 💥 단순 탭 시 특수 아이템 발동
       if (Math.abs(dx) < 15 && Math.abs(dy) < 15) {
         if (currentTile && currentTile.type >= 5) {
           isBusy = true;
@@ -434,7 +444,7 @@
         }
       }
 
-      // 스와이프 조작
+      // 🔄 스와이프 조작
       let targetTile = null;
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 20) {
         targetTile = { row: startTile.row, col: startTile.col + (dx > 0 ? 1 : -1) };
@@ -469,7 +479,7 @@
 
       await sleep(220);
 
-      // 특수 아이템 간 조합 판정
+      // 특수 아이템 조합
       if (tile1.type >= 5 && tile2.type >= 5) {
         await triggerComboSpecial(t2.row, t2.col, tile1.type, tile2.type);
         await applyGravity();
@@ -501,13 +511,14 @@
         }
       }
 
-      // 일반 매칭 판정
+      // 일반 매칭
       const matched = checkMatchesOnly();
       if (matched.length > 0) {
         await clearMatches(matched, t2);
         await applyGravity();
         await processCascade();
       } else {
+        // 원위치
         tile1.targetX = t1.col * TILE_SIZE;
         tile1.targetY = t1.row * TILE_SIZE;
         tile2.targetX = t2.col * TILE_SIZE;
@@ -676,7 +687,7 @@
     async function triggerFever(targetType) {
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
-          if (board[r][c] === targetType || targetType === TYPE_FEVER) {
+          if (board[r][c].type === targetType || targetType === TYPE_FEVER) {
             spawnParticles(c * TILE_SIZE, r * TILE_SIZE, "#feca57", 8);
             board[r][c].type = -1;
             addScore(250);
@@ -759,20 +770,25 @@
         for (let r = GRID_SIZE - 1; r >= 0; r--) {
           if (board[r][c].type !== -1) {
             if (emptyRow !== r) {
-              board[emptyRow][c] = board[r][c];
+              board[emptyRow][c].type = board[r][c].type;
+              board[emptyRow][c].targetX = c * TILE_SIZE;
               board[emptyRow][c].targetY = emptyRow * TILE_SIZE;
-              board[r][c] = createTileObj(-1, r, c);
+              board[r][c].type = -1;
             }
             emptyRow--;
           }
         }
         let newCount = 1;
         for (let r = emptyRow; r >= 0; r--) {
-          board[r][c] = createTileObj(getRandomNormalTile(), r, c, newCount);
+          board[r][c].type = getRandomNormalTile();
+          board[r][c].x = c * TILE_SIZE;
+          board[r][c].y = (r - newCount) * TILE_SIZE;
+          board[r][c].targetX = c * TILE_SIZE;
+          board[r][c].targetY = r * TILE_SIZE;
           newCount++;
         }
       }
-      await sleep(280);
+      await sleep(260);
     }
 
     function sleep(ms) {
@@ -798,7 +814,7 @@
 
     function endGame() {
       isGameOver = true;
-      if (bgm) bgm.pause(); // 게임 종료 시 BGM 정지
+      if (bgm) bgm.pause();
       document.getElementById("finalScore").innerText = score.toLocaleString();
       document.getElementById("resultModal").style.display = "flex";
     }
