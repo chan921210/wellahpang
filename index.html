@@ -46,13 +46,14 @@
       background: rgba(255, 255, 255, 0.12);
       border: 1px solid rgba(255, 255, 255, 0.1);
       color: #fff;
-      font-size: 16px;
-      padding: 8px 12px;
+      font-size: 15px;
+      padding: 8px 14px;
       border-radius: 20px;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
+      font-weight: bold;
     }
 
     #gameCanvas {
@@ -136,13 +137,10 @@
 </head>
 <body>
 
-  <!-- BGM 태그 -->
-  <audio id="bgmAudio" src="bgm.mp3" loop preload="auto"></audio>
-
   <div class="header">
     <div class="header-left">
       <div class="badge">남은 시간: <span id="timer">60</span>s</div>
-      <button class="btn-sound" id="btnSound" onclick="toggleSound()">🔊</button>
+      <button class="btn-sound" id="btnSound" onclick="toggleSound()">🔇 BGM ON</button>
     </div>
     <div class="badge">점수: <span id="score">0</span></div>
   </div>
@@ -204,9 +202,10 @@
       7: "fever.png"
     };
 
+    // 타일 배경색: 일반 아이템(0~4)은 깨끗한 순백색(#ffffff), 특수 아이템은 부드러운 강조 배경
     const TILE_BG_COLORS = [
-      "#e5d4ff", "#e5d4ff", "#e5d4ff", "#e5d4ff", "#e5d4ff",
-      "#ffd1d1", "#d8f8b7", "#ffeaa7"
+      "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff",
+      "#ffecec", "#ebfbee", "#fff9db"
     ];
 
     const images = {};
@@ -220,34 +219,48 @@
     // ==========================================
     // 🎵 BGM 컨트롤
     // ==========================================
-    const bgm = document.getElementById("bgmAudio");
-    const btnSound = document.getElementById("btnSound");
-    let isBgmUserMuted = false;
+    const bgm = new Audio("bgm.mp3");
+    bgm.loop = true;
+    bgm.volume = 0.5;
 
-    function playBgm() {
-      if (!isBgmUserMuted && bgm.paused) {
-        bgm.play().then(() => {
-          btnSound.innerText = "🔊";
-        }).catch(() => {});
+    const btnSound = document.getElementById("btnSound");
+    let isBgmPlaying = false;
+    let userMuted = false;
+
+    function attemptPlayBgm() {
+      if (userMuted || isBgmPlaying) return;
+      const p = bgm.play();
+      if (p !== undefined) {
+        p.then(() => {
+          isBgmPlaying = true;
+          btnSound.innerText = "🔊 BGM";
+        }).catch(() => {
+          btnSound.innerText = "🔇 BGM ON";
+        });
       }
     }
 
     function toggleSound() {
-      if (bgm.paused) {
-        bgm.play();
-        btnSound.innerText = "🔊";
-        isBgmUserMuted = false;
+      if (!isBgmPlaying || bgm.paused) {
+        userMuted = false;
+        bgm.play().then(() => {
+          isBgmPlaying = true;
+          btnSound.innerText = "🔊 BGM";
+        }).catch(err => {
+          alert("음원 파일(bgm.mp3)을 불러올 수 없거나 권한이 제한되었습니다.");
+        });
       } else {
+        userMuted = true;
         bgm.pause();
-        btnSound.innerText = "🔇";
-        isBgmUserMuted = true;
+        isBgmPlaying = false;
+        btnSound.innerText = "🔇 BGM OFF";
       }
     }
 
-    // 첫 터치/클릭 시 오디오 활성화
-    window.addEventListener("pointerdown", () => {
-      playBgm();
-    }, { once: true });
+    const unlockEvents = ["pointerdown", "touchstart", "click"];
+    unlockEvents.forEach(evt => {
+      window.addEventListener(evt, () => attemptPlayBgm(), { passive: true });
+    });
 
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
@@ -265,7 +278,7 @@
     let startPos = null;
     let startTile = null;
 
-    function fillRoundedRect(x, y, w, h, r, color) {
+    function fillRoundedRect(x, y, w, h, r, color, strokeColor = null) {
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.moveTo(x + r, y);
@@ -279,6 +292,12 @@
       ctx.quadraticCurveTo(x, y, x + r, y);
       ctx.closePath();
       ctx.fill();
+
+      if (strokeColor) {
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
     }
 
     function getRandomNormalTile() {
@@ -332,24 +351,22 @@
       }
     }
 
-    // 메인 루프 (깨짐 없이 정밀 렌더링)
     function gameLoop() {
       ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-      // 1. 고정 배경 타일 격자 그리기 (절대 깨지지 않음)
+      // 1. 베이스 슬롯 배경
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
           fillRoundedRect(c * TILE_SIZE + 4, r * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8, 12, "#2b2d42");
         }
       }
 
-      // 2. 동적 타일 렌더링
+      // 2. 화이트 타일 및 아이템 렌더링
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
           const tile = board[r][c];
           if (!tile || tile.type === -1) continue;
 
-          // 위치 보간 (부드러운 이동)
           const dx = tile.targetX - tile.x;
           const dy = tile.targetY - tile.y;
           if (Math.abs(dx) > 0.4 || Math.abs(dy) > 0.4) {
@@ -364,17 +381,23 @@
           const px = tile.x + 4;
           const py = tile.y + 4;
 
-          // 타일 컬러 배경
-          fillRoundedRect(px, py, size, size, 12, TILE_BG_COLORS[tile.type] || "#e5d4ff");
+          // 특수 아이템 테두리 강조
+          let strokeColor = null;
+          if (tile.type === TYPE_BOMB) strokeColor = "#ff6b6b";
+          else if (tile.type === TYPE_CROSS) strokeColor = "#51cf66";
+          else if (tile.type === TYPE_FEVER) strokeColor = "#fcc419";
 
-          // 아이콘 이미지
+          // 타일 흰색 배경 렌더링
+          fillRoundedRect(px, py, size, size, 12, TILE_BG_COLORS[tile.type] || "#ffffff", strokeColor);
+
+          // 이미지 렌더링 (가장 선명하게 표시)
           if (images[tile.type] && images[tile.type].complete && images[tile.type].naturalWidth > 0) {
-            ctx.drawImage(images[tile.type], px + 3, py + 3, size - 6, size - 6);
+            ctx.drawImage(images[tile.type], px + 4, py + 4, size - 8, size - 8);
           }
         }
       }
 
-      // 3. 파티클 이펙트
+      // 3. 파티클 렌더링
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.x += p.vx;
@@ -409,7 +432,7 @@
     }
 
     function handleStart(e) {
-      playBgm();
+      attemptPlayBgm();
       if (isGameOver || isBusy) return;
       const pos = getCoords(e);
       const col = Math.floor(pos.x / TILE_SIZE);
@@ -430,7 +453,6 @@
 
       const currentTile = board[startTile.row][startTile.col];
 
-      // 💥 단순 탭 시 특수 아이템 발동
       if (Math.abs(dx) < 15 && Math.abs(dy) < 15) {
         if (currentTile && currentTile.type >= 5) {
           isBusy = true;
@@ -444,7 +466,6 @@
         }
       }
 
-      // 🔄 스와이프 조작
       let targetTile = null;
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 20) {
         targetTile = { row: startTile.row, col: startTile.col + (dx > 0 ? 1 : -1) };
@@ -479,7 +500,6 @@
 
       await sleep(220);
 
-      // 특수 아이템 조합
       if (tile1.type >= 5 && tile2.type >= 5) {
         await triggerComboSpecial(t2.row, t2.col, tile1.type, tile2.type);
         await applyGravity();
@@ -488,7 +508,6 @@
         return;
       }
 
-      // 특수 아이템 + 일반 타일 스왑
       if (tile1.type >= 5 || tile2.type >= 5) {
         let triggered = false;
         if (tile1.type === TYPE_FEVER || tile2.type === TYPE_FEVER) {
@@ -511,14 +530,12 @@
         }
       }
 
-      // 일반 매칭
       const matched = checkMatchesOnly();
       if (matched.length > 0) {
         await clearMatches(matched, t2);
         await applyGravity();
         await processCascade();
       } else {
-        // 원위치
         tile1.targetX = t1.col * TILE_SIZE;
         tile1.targetY = t1.row * TILE_SIZE;
         tile2.targetX = t2.col * TILE_SIZE;
@@ -653,7 +670,7 @@
 
     function triggerSpecialEffect(r, c, type) {
       board[r][c].type = -1;
-      spawnParticles(c * TILE_SIZE, r * TILE_SIZE, TILE_BG_COLORS[type], 10);
+      spawnParticles(c * TILE_SIZE, r * TILE_SIZE, "#ffffff", 10);
 
       if (type === TYPE_BOMB) {
         for (let dr = -1; dr <= 1; dr++) {
@@ -661,7 +678,7 @@
             const nr = r + dr, nc = c + dc;
             if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE) {
               if (board[nr][nc].type !== -1) {
-                spawnParticles(nc * TILE_SIZE, nr * TILE_SIZE, TILE_BG_COLORS[board[nr][nc].type]);
+                spawnParticles(nc * TILE_SIZE, nr * TILE_SIZE, "#ff7675");
                 board[nr][nc].type = -1;
                 addScore(150);
               }
@@ -671,12 +688,12 @@
       } else if (type === TYPE_CROSS) {
         for (let i = 0; i < GRID_SIZE; i++) {
           if (board[r][i].type !== -1) {
-            spawnParticles(i * TILE_SIZE, r * TILE_SIZE, "#fff");
+            spawnParticles(i * TILE_SIZE, r * TILE_SIZE, "#51cf66");
             board[r][i].type = -1;
             addScore(100);
           }
           if (board[i][c].type !== -1) {
-            spawnParticles(c * TILE_SIZE, i * TILE_SIZE, "#fff");
+            spawnParticles(c * TILE_SIZE, i * TILE_SIZE, "#51cf66");
             board[i][c].type = -1;
             addScore(100);
           }
@@ -688,7 +705,7 @@
       for (let r = 0; r < GRID_SIZE; r++) {
         for (let c = 0; c < GRID_SIZE; c++) {
           if (board[r][c].type === targetType || targetType === TYPE_FEVER) {
-            spawnParticles(c * TILE_SIZE, r * TILE_SIZE, "#feca57", 8);
+            spawnParticles(c * TILE_SIZE, r * TILE_SIZE, "#fcc419", 8);
             board[r][c].type = -1;
             addScore(250);
           }
@@ -741,7 +758,7 @@
         else if (m.len === 4 && !spawnSpecial) spawnSpecial = { r: m.r, c: m.c, type: TYPE_BOMB };
         
         if (board[m.r][m.c].type !== -1) {
-          spawnParticles(m.c * TILE_SIZE, m.r * TILE_SIZE, TILE_BG_COLORS[board[m.r][m.c].type]);
+          spawnParticles(m.c * TILE_SIZE, m.r * TILE_SIZE, "#ffffff");
           board[m.r][m.c].type = -1;
           addScore(100);
         }
